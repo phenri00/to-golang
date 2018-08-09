@@ -26,9 +26,7 @@ base64Encode() {
 }
 
 buildBinary() {
-    if go build -o "$FILE_OUTPUT" "$TMPFILE"; then
-        echo "done building binary file"
-    else
+    if ! go build -o "$FILE_OUTPUT" "$TMPFILE"; then
         exit 1
     fi
 }
