@@ -27,6 +27,7 @@ base64Encode() {
 
 buildBinary() {
     if ! go build -o "$FILE_OUTPUT" "$TMPFILE"; then
+        err "Build failed"
         exit 1
     fi
 }
@@ -46,12 +47,16 @@ checkArg() {
 }
 
 checkDep() {
-    which go > /dev/null || { echo "Missing package: go."; exit 1; }
-    which base64 > /dev/null || { echo "Missing package: base64."; exit 1; }
+    which go > /dev/null || { err "Missing package: go."; exit 1; }
+    which base64 > /dev/null || { err "Missing package: base64."; exit 1; }
 }
 
 checkFileType() {
     FILE_EXT=$(file -b --mime-type "$1")
+}
+
+err() {
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&2
 }
 
 generateGoFile() {
@@ -119,7 +124,7 @@ setShellCmd() {
             SHELL_CMD=("python" "-c")
             ;;
         *)
-            echo "file not supported"
+            err "file not supported"
             exit 1
             ;;
     esac
