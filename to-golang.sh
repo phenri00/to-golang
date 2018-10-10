@@ -1,5 +1,3 @@
-#!/usr/bin/env bash 
-
 set -e
 
 VAR_ENC=
@@ -26,8 +24,9 @@ base64Encode() {
 }
 
 buildBinary() {
-    if ! go build -o "$FILE_OUTPUT" "$TMPFILE"; then
-        err "Build failed"
+    if go build -o "$FILE_OUTPUT" "$TMPFILE"; then
+        echo "done building binary file"
+    else
         exit 1
     fi
 }
@@ -47,16 +46,12 @@ checkArg() {
 }
 
 checkDep() {
-    which go > /dev/null || { err "Missing package: go."; exit 1; }
-    which base64 > /dev/null || { err "Missing package: base64."; exit 1; }
+    which go > /dev/null || { echo "Missing package: go."; exit 1; }
+    which base64 > /dev/null || { echo "Missing package: base64."; exit 1; }
 }
 
 checkFileType() {
     FILE_EXT=$(file -b --mime-type "$1")
-}
-
-err() {
-  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&2
 }
 
 generateGoFile() {
@@ -64,50 +59,79 @@ generateGoFile() {
 package main
 
 import (
-    "bytes"
-    "encoding/base64"
-    "os"
-    "os/exec"
-    "syscall"
+	"encoding/base64"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"sync"
+	"syscall"
 )
 
 func main() {
 
-    scriptArgs := os.Args
+	scriptArgs := os.Args
 
-    data := "$VAR_ENC"
+	data := "$VAR_ENC"
 
-    uDec, _ := base64.StdEncoding.DecodeString(data)
-    cmdScript := string(uDec)
+	uDec, _ := base64.StdEncoding.DecodeString(data)
+	cmdScript := string(uDec)
 
-    cmd := []string{"${SHELL_CMD[1]}", cmdScript}
-    cmd = append(cmd, scriptArgs...)
+	cmd := []string{"${SHELL_CMD[1]}", cmdScript}
+	cmd = append(cmd, scriptArgs...)
 
-    var waitStatus syscall.WaitStatus
+	var waitStatus syscall.WaitStatus
 
-    output := exec.Command("${SHELL_CMD[0]}", cmd...)
+	var wg sync.WaitGroup
 
-    cmdOutput := &bytes.Buffer{}
-    output.Stdout = cmdOutput
+	cmdexec := exec.Command("${SHELL_CMD[0]}", cmd...)
 
-    cmdErrOutput := &bytes.Buffer{}
-    output.Stderr = cmdErrOutput
+	stdout, err := cmdexec.StdoutPipe()
+	if err != nil {
+		panic(err)
+	}
 
-    if err := output.Run(); err != nil {
-        if exitError, ok := err.(*exec.ExitError); ok {
-            waitStatus = exitError.Sys().(syscall.WaitStatus)
-        }
-    } else {
-        // Success
-        waitStatus = output.ProcessState.Sys().(syscall.WaitStatus)
-    }
+	stderr, err := cmdexec.StderrPipe()
+	if err != nil {
+		panic(err)
+	}
 
-    exitCode := int(waitStatus.ExitStatus())
+	if err := cmdexec.Start(); err != nil {
+		panic(err)
+	}
 
-    os.Stdout.WriteString(string(cmdOutput.Bytes()))
-    os.Stderr.WriteString(string(cmdErrOutput.Bytes()))
+	wg.Add(2)
 
-    os.Exit(exitCode)
+	go func() {
+		defer wg.Done()
+		b, err := ioutil.ReadAll(stdout)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprint(os.Stdout, string(b))
+	}()
+
+	go func() {
+		defer wg.Done()
+		b, err := ioutil.ReadAll(stderr)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprint(os.Stderr, string(b))
+	}()
+
+	wg.Wait()
+
+	if err := cmdexec.Wait(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			waitStatus = exitError.Sys().(syscall.WaitStatus)
+		} else {
+			waitStatus = cmdexec.ProcessState.Sys().(syscall.WaitStatus)
+		}
+	}
+	exitCode := int(waitStatus.ExitStatus())
+
+	os.Exit(exitCode)
 }
 EOF
 }
@@ -124,7 +148,7 @@ setShellCmd() {
             SHELL_CMD=("python" "-c")
             ;;
         *)
-            err "file not supported"
+            echo "file not supported"
             exit 1
             ;;
     esac
